@@ -34,7 +34,19 @@ int esat::main(int argc, char **argv) {
 		//Draw
 		esat::DrawBegin();
 		esat::DrawClear(0, 0, 0);
-		DrawSelecctionDB();
+
+		switch (g_aplication_state)
+		{
+		case kSelectDataBase:
+			DrawSelectionDB();
+			break;
+		case kClientPage:
+			DrawClientPage();
+			break;
+		default:
+			break;
+		}
+
 		esat::DrawEnd();
 		
 		
