@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+
 #include "ui_client.cc"
 #include "sqlite_client.cc"
 #include "../includes/sqlite_client.h"
@@ -24,7 +25,7 @@ int esat::main(int argc, char **argv) {
 
 	srand(time(NULL));
 
-	esat::WindowInit(1080, 1920);
+	esat::WindowInit(1920,  1080);
 	esat::WindowSetMouseVisibility(true);
 
 

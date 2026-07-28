@@ -1,4 +1,5 @@
 #include "../includes/sqlite_client.h"
+#include "../includes/ui_client.h"
 /**
 * Opens the selected database
 *
@@ -13,11 +14,18 @@ sqlite3 *db = nullptr;
 
 int const kRowsPerPage  = 10;
 int g_num_columns  = 1; 
-char** page_register;
-
-char** name_columns;
 
 bool g_is_table_loaded = false;
+
+void InitTableNamesMem(){
+    int total_tables = NumsOfTablesInDB();
+    g_tables_name = (char**)calloc(total_tables,sizeof(*g_tables_name));
+    
+    for (int i = 0; i < total_tables; i++)
+    {
+        g_tables_name[i] = (char*)calloc(50,sizeof(char));
+    }
+}
 
 sqlite3* InitDatabase(char *db_name){
     
@@ -38,11 +46,11 @@ sqlite3* InitDatabase(char *db_name){
     }
 
     LoadTable();
+    InitTableNamesMem();
     printf("Se abrio correctamente");
-    
+    g_aplication_state = kClientPage;
     return db;
 }
-
 
 /*
  /$$$$$$$$ /$$$$$$  /$$$$$$$   /$$$$$$ 
@@ -54,12 +62,11 @@ sqlite3* InitDatabase(char *db_name){
    | $$  |  $$$$$$/| $$$$$$$/|  $$$$$$/
    |__/   \______/ |_______/  \______/ 
                                        
-
-    Cargar datos de pagina en array
-    pensar como guardar los datos de las tablas                       
-                                       
+    Hacer que las querys no se repitan todo el rato, solo una vez y ya.                       
+    Devolver errores en caso de error                                         
 
 */
+
 int NumsOfColumnsInTable(char* table_name){
     int total_columns = 0;
 
@@ -81,10 +88,27 @@ int NumsOfColumnsInTable(char* table_name){
     // {
         
     // }
-    
-
+    sqlite3_finalize(statement);
     return total_columns;
 
+}
+
+int NumsOfTablesInDB(){
+    char *query = "SELECT COUNT(*) FROM  sqlite_schema WHERE  type ='table' AND name NOT LIKE 'sqlite_%'";
+
+    sqlite3_stmt *statement = nullptr;
+
+    int result = sqlite3_prepare_v2(db,query,-1,&statement,NULL);
+    int total_tables = 0;
+    if (result != SQLITE_OK)
+    {
+        return total_tables;
+    }
+    sqlite3_step(statement);
+
+    total_tables = sqlite3_column_int(statement,0); 
+    sqlite3_finalize(statement);
+    return total_tables;
 }
 
 void ColumnsNameInTable(){
@@ -96,34 +120,133 @@ void ColumnsNameInTable(){
     if (result == SQLITE_OK) {
 
     for (int i = 0; i < NumsOfColumnsInTable("usuario"); ++i) {
-        strcpy(name_columns[i],sqlite3_column_name(statement, i));
+        strcpy(g_name_columns[i],sqlite3_column_name(statement, i));
 
-        printf("Column %d: %s\n", i, name_columns[i]);
+        printf("Column %d: %s\n", i, g_name_columns[i]);
     }
     }
 
     sqlite3_finalize(statement);
 }
 
+void GetActualPage(int page){
+    int const krows = 10;
+    int offset = (page - 1) * krows;
+    
+    char* query = "SELECT * FROM usuario LIMIT 10 OFFSET ?";
+    sqlite3_stmt *statement = nullptr;
+    
+    int result = sqlite3_prepare_v2(db,query,-1,&statement,nullptr);
+    
+    sqlite3_bind_int(statement,1,offset);
+    
+    int num_columns = sqlite3_column_count(statement);
+    if (result == SQLITE_OK)
+    {
+        int actual_row = 0;
+
+        
+        while (sqlite3_step(statement) == SQLITE_ROW)
+        {
+            for (int column = 0; column < num_columns; column++)
+            {
+                char* const buffer = (char* const)sqlite3_column_text(statement,column);
+                // printf("%s \n",buffer);
+                strcpy(g_page_register[actual_row * num_columns + column],buffer);
+            }
+            actual_row++;
+        }
+        
+    }
+    sqlite3_finalize(statement);
+    for (int row = 0; row < kRowsPerPage; ++row) {
+    for (int column = 0; column < num_columns; ++column) {
+        printf("%s\t",
+            g_page_register[row * num_columns + column]);
+    }
+
+    printf("\n");
+    }
+
+
+}
+
+void FreePageMem(int num_cells){
+    for (int i = 0; i < num_cells; ++i) {
+        free(g_page_register[i]);
+        g_page_register[i] = nullptr;
+    }
+
+    free(g_page_register);
+    g_page_register = nullptr;
+}
+
+void FreeNameColumns(int num_columns){
+    for (int i = 0; i < num_columns; ++i) {
+        free(g_name_columns[i]);
+        g_name_columns[i] = nullptr;
+    }
+
+    free(g_name_columns);
+    g_name_columns = nullptr;    
+}
+
+int TotalRegisters(){
+    char* query = "SELECT COUNT(*) FROM usuario";
+    sqlite3_stmt* statement = nullptr;
+
+    int result = sqlite3_prepare_v2(db,query,-1,&statement,nullptr);
+    int total = 0;
+    if (result == SQLITE_OK)
+    {
+        sqlite3_step(statement);
+        total = sqlite3_column_int(statement,0);
+    }
+
+    sqlite3_finalize(statement);
+    return total;
+}
 
 void LoadTable(){
+    
+    //Reserves for mem
+
     int const kCellSize = 50;
     int num_columns = NumsOfColumnsInTable("usuario");
-    int num_cells = kRowsPerPage * num_columns;
-
-    page_register = (char**)calloc(num_cells,sizeof(*page_register));
-
-    for (int i = 0; i < num_cells; i++) {
-        page_register[i] = (char*)calloc(kCellSize,sizeof(char));
-    }
-
-    name_columns = (char**)calloc(num_columns,sizeof(*name_columns));
-
-    for (int i = 0; i < num_columns; i++)
+    
+    if (g_name_columns != nullptr)
     {
-        name_columns[i] = (char*)calloc(kCellSize,sizeof(char));
+        FreeNameColumns(num_columns);
     }
     
+    //Reserve for the names
+    g_name_columns = (char**)calloc(num_columns,sizeof(*g_name_columns));
+    
+    for (int i = 0; i < num_columns; i++)
+    {
+        g_name_columns[i] = (char*)calloc(kCellSize,sizeof(char));
+    }
+
+    
+    int num_cells = kRowsPerPage * num_columns;
+    if (g_page_register != nullptr)
+    {
+        FreePageMem(num_cells);
+    }
+    
+    //Reserve for the page
+    g_page_register = (char**)calloc(num_cells,sizeof(*g_page_register));
+
+    for (int i = 0; i < num_cells; i++) {
+        g_page_register[i] = (char*)calloc(kCellSize,sizeof(char));
+    }
+
+    
+    //Save Columns names
     ColumnsNameInTable();
+    GetActualPage(g_actual_page);
+    g_max_page = TotalRegisters() / 10;
+    printf("max = %d total = %d",g_max_page,TotalRegisters());
+
 
 }
