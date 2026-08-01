@@ -35,15 +35,15 @@ void DrawSelectionDB(){
    | $$  |  $$$$$$/| $$$$$$$/|  $$$$$$/
    |__/   \______/ |_______/  \______/ 
                                        
-    Hacer que la primera tabla sea un hijo. y el apartado de la segunda sea otro hijo                     
+    hacer la tabla de la query                 
                                        
 
 */
-void DrawTables(){
+void DrawTables(char* table_name,char** names_columns,char** page_register){
 
 
 
-    int num_columns = NumsOfColumnsInTable("usuario");
+    int num_columns = NumsOfColumnsInTable(table_name);
  
     
     if(ImGui::BeginTable("table1",num_columns)){
@@ -53,7 +53,7 @@ void DrawTables(){
         {
             ImGui::TableSetColumnIndex(column);
 
-            ImGui::Text("%s",g_name_columns[column]);
+            ImGui::Text("%s",names_columns[column]);
 
         }   
 
@@ -63,7 +63,7 @@ void DrawTables(){
             for (int column = 0; column < num_columns; column++)
             {
                 ImGui::TableSetColumnIndex(column);
-                ImGui::Text("%s",g_page_register[row * num_columns + column]);
+                ImGui::Text("%s",page_register[row * num_columns + column]);
             }
             
         }
@@ -74,12 +74,12 @@ void DrawTables(){
         float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
         if (ImGui::ArrowButton("##left", ImGuiDir_Left) && g_actual_page != 1) { 
             g_actual_page--;
-            LoadTable(); 
+            LoadTable(table_name); 
         }
         ImGui::SameLine(0.0f, spacing);
         if (ImGui::ArrowButton("##right", ImGuiDir_Right) && g_actual_page < g_max_page) { 
             g_actual_page++; 
-            LoadTable();
+            LoadTable(table_name);
         }
         ImGui::SameLine();
         ImGui::Text("%d", g_actual_page);
@@ -87,17 +87,39 @@ void DrawTables(){
 
 
 }
-
+int g_selected_table = -1;
+char user_query[200];
 void DrawClientUI(){
     ImGui::Begin("Tables");
-    
-    for (int tables = 0; tables < 10; tables++)
+
+    if (ImGui::BeginTabBar("example"))
     {
-        /* code */
+        for (int tables = 0; tables < total_tables; tables++)
+        {
+
+            
+            if (ImGui::BeginTabItem(g_tables_name[tables]))
+            {
+                if (g_selected_table != tables)
+                {
+                    g_selected_table = tables;
+                    g_actual_page = 1;
+                    LoadTable(g_tables_name[tables]);
+                }
+                DrawTables(g_tables_name[tables],g_name_columns,g_page_register);
+
+                ImGui::EndTabItem();
+            }   
+
+        }
+
+        ImGui::EndTabBar();
     }
+    ImGui::Text("Query ");
+    ImGui::SameLine();
+    ImGui::InputTextWithHint("","Write the query and the result will be displayed in a table" , user_query, 200);    
     
     
-    DrawTables();
     ImGui::End();
 }
 
