@@ -78,7 +78,7 @@ sqlite3* InitDatabase(char *db_name){
 
     InitTableNamesMem();
     NameOfTables();
-    LoadTable(g_tables_name[0]);
+    LoadTable(g_tables_name[0],&g_name_columns,&g_page_register,&g_num_columns,&g_num_cells,g_actual_page,&g_max_page);
     printf("Se abrio correctamente");
     g_aplication_state = kClientPage;
     return db;
@@ -99,11 +99,11 @@ sqlite3* InitDatabase(char *db_name){
 
 */
 
-int NumsOfColumnsInTable(char* table_name){
+int NumsOfColumnsInQuery(char* base_query){
     int total_columns = 0;
 
-    char query[200] = "SELECT * FROM ? LIMIT 10";
-    sprintf(query,"SELECT * FROM \"%s\" LIMIT 0",table_name);
+    char query[200];
+    sprintf(query,"SELECT * FROM (%s) LIMIT 0",base_query);
     char *error_msg;
 
     sqlite3_stmt* statement = nullptr;
@@ -140,33 +140,32 @@ int NumsOfTablesInDB(){
 
     total_tables = sqlite3_column_int(statement,0); 
     sqlite3_finalize(statement);
-    printf("total:%d",total_tables);
     return total_tables;
 }
 
-void ColumnsNameInTable(char* table_name){
+void ColumnsNameInQuery(char* base_query,char **name_colums){
     sqlite3_stmt* statement = NULL;
     char query[200];
-    sprintf(query,"SELECT * FROM  \"%s\"",table_name);
+    sprintf(query,"SELECT * FROM  (%s)",base_query);
     int result = sqlite3_prepare_v2(db,query,-1,&statement,NULL);
 
     if (result == SQLITE_OK) {
 
 
-        for (int i = 0; i < NumsOfColumnsInTable(table_name); ++i) {
-            strcpy(g_name_columns[i],sqlite3_column_name(statement, i));
+        for (int i = 0; i < NumsOfColumnsInQuery(base_query); ++i) {
+            strcpy(name_colums[i],sqlite3_column_name(statement, i));
         }
     }
 
     sqlite3_finalize(statement);
 }
 
-void GetActualPage(int page,char *table_name){
+void GetActualPage(int page,char *base_query,char** page_register){
     int const krows = 10;
     int offset = (page - 1) * krows;
     
     char query[200];
-    sprintf(query,"SELECT * FROM  \"%s\" LIMIT 10 OFFSET ?",table_name);
+    sprintf(query,"SELECT * FROM  (%s) LIMIT 10 OFFSET ?",base_query);
     sqlite3_stmt *statement = nullptr;
     
     int result = sqlite3_prepare_v2(db,query,-1,&statement,nullptr);
@@ -183,8 +182,8 @@ void GetActualPage(int page,char *table_name){
             for (int column = 0; column < num_columns; column++)
             {
                 char* const buffer = (char* const)sqlite3_column_text(statement,column);
-                printf("%s \n",buffer);
-                strcpy(g_page_register[actual_row * num_columns + column],buffer);
+                // printf("%s \n",buffer);
+                strcpy(page_register[actual_row * num_columns + column],buffer);
             }
             actual_row++;
         }
@@ -195,34 +194,34 @@ void GetActualPage(int page,char *table_name){
 
 }
 
-void FreePageMem(int num_cells){
+void FreePageMem(char** page_register,int num_cells){
     for (int i = 0; i < num_cells; ++i) {
-        free(g_page_register[i]);
-        g_page_register[i] = nullptr;
+        free(page_register[i]);
+        page_register[i] = nullptr;
     }
 
-    free(g_page_register);
-    g_page_register = nullptr;
+    free(page_register);
+    page_register = nullptr;
 }
 
-void FreeNameColumns(int num_columns){
+void FreeNameColumns(char** name_columns,int num_columns){
     for (int i = 0; i < num_columns; ++i) {
-        free(g_name_columns[i]);
-        g_name_columns[i] = nullptr;
+        free(name_columns[i]);
+        name_columns[i] = nullptr;
     }
 
-    free(g_name_columns);
-    g_name_columns = nullptr;    
+    free(name_columns);
+    name_columns = nullptr;    
 }
 
-int TotalRegisters(char* table_name){
+int TotalRegisters(char* base_query){
     char query[200];
-    sprintf(query,"SELECT COUNT(*) FROM  \"%s\"",table_name);
+    sprintf(query,"SELECT COUNT(*) FROM  (%s)",base_query);
     
     sqlite3_stmt* statement = nullptr;
 
     int result = sqlite3_prepare_v2(db,query,-1,&statement,nullptr);
-    sqlite3_bind_text(statement,1,table_name,-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(statement,1,base_query,-1,SQLITE_TRANSIENT);
     int total = 0;
     if (result == SQLITE_OK)
     {
@@ -233,8 +232,21 @@ int TotalRegisters(char* table_name){
     sqlite3_finalize(statement);
     return total;
 }
-int g_num_columns = 0;
-int g_num_cells = 0;
+
+bool IsQueryValid(char* query){
+
+    sqlite3_stmt *statement = nullptr;
+    int result = sqlite3_prepare_v2(db,query,-1,&statement,nullptr);
+
+    if (result != SQLITE_OK)
+    {
+        sqlite3_finalize(statement);
+        return false;
+    }
+    sqlite3_finalize(statement);
+    return true;
+}
+
 /*
  /$$$$$$$$ /$$$$$$  /$$$$$$$   /$$$$$$ 
 |__  $$__//$$__  $$| $$__  $$ /$$__  $$
@@ -246,54 +258,54 @@ int g_num_cells = 0;
    |__/   \______/ |_______/  \______/ 
                                        
     modificar LoadTable() para que carge cualquier pagina, y obtener de esa manera la tabla despues del from y lo que venga despues del where
-    de esa manera el count para obtener bien la paginacion se puede hacer bien si pone limits               
-                                       
+    de esa manera el count para obtener bien la paginacion se puede hacer bien si pone limits
+    recordar de quirtarle al usuario los ;      
 
 */
-void LoadTable(char* table_name){
+bool LoadTable(char* base_query,char*** name_columns,char*** page_register,int *num_columns, int *num_cells,int actual_page, int *max_page){
     
     //Reserves for mem
 
     int const kCellSize = 50;
-    int num_columns = NumsOfColumnsInTable(table_name);
-    
-    if (g_name_columns != nullptr)
+    int num_columns_refresh = NumsOfColumnsInQuery(base_query);
+    if (name_columns != nullptr)
     {
-        FreeNameColumns(g_num_columns);
+        FreeNameColumns(*name_columns,*num_columns);
     }
     
-    if (g_page_register != nullptr)
+    if (page_register != nullptr)
     {
-        FreePageMem(g_num_cells);
+        FreePageMem(*page_register,*num_cells);
     }
-
+    
     //Reserve for the names
-    g_name_columns = (char**)calloc(num_columns,sizeof(*g_name_columns));
+    *name_columns = (char**)calloc(num_columns_refresh,sizeof(*name_columns));
     
-    for (int i = 0; i < num_columns; i++)
+    for (int i = 0; i < num_columns_refresh; i++)
     {
-        g_name_columns[i] = (char*)calloc(kCellSize,sizeof(char));
+        (*name_columns)[i] = (char*)calloc(kCellSize,sizeof(char));
     }
-
     
-    int num_cells = kRowsPerPage * num_columns;
-
+    
+    
+    int num_cells_refresh = kRowsPerPage * num_columns_refresh;
+    
     
     //Reserve for the page
-    g_page_register = (char**)calloc(num_cells,sizeof(*g_page_register));
-
-    for (int i = 0; i < num_cells; i++) {
-        g_page_register[i] = (char*)calloc(kCellSize,sizeof(char));
+    *page_register = (char**)calloc(num_cells_refresh,sizeof(*page_register));
+    
+    for (int i = 0; i < num_cells_refresh; i++) {
+        (*page_register)[i] = (char*)calloc(kCellSize,sizeof(char));
     }
-
-    g_num_columns = num_columns;
-    g_num_cells = num_cells;
+    *num_columns = num_columns_refresh;
+    *num_cells = num_cells_refresh;
     //Save Columns names
-    ColumnsNameInTable(table_name);
-    GetActualPage(g_actual_page,table_name);
-    g_max_page = TotalRegisters(table_name) / 10;
-    printf("\nHOLA ESTOY DENTRO\n");
+    ColumnsNameInQuery(base_query,*name_columns);
+    GetActualPage(actual_page,base_query,*page_register);
+    *max_page = TotalRegisters(base_query) / 10;
+    printf("\nLLEGUEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE \n");
 
 
+    return true;
 
 }
